@@ -1,0 +1,2 @@
+# RenduOsler
+Master thesis scripts
