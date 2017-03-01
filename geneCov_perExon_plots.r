@@ -17,12 +17,15 @@ Genome_files <- list.files(path=CovData, pattern="^Sorted_MDup_Genome_39_",all.f
 
 WE_covtab <-lapply(paste(CovData,Exome_files,sep=""), read.table, as.is=TRUE,header=TRUE)
 WG_covtab <-lapply(paste(CovData,Genome_files,sep=""),read.table, as.is=TRUE,header=TRUE)
-#Each elem of list WE,WG refers to one Patient
+# Each elem of list WE,WG refers to one Patient
+# Patient_No added manually to each df : WE_covtab[[x]]$Patient_No <- "39_x"
 
 geneID <-  c("ALK","ENG","SMAD4","ACVRL1")
 dB <- useMart(biomart="ensembl", dataset="hsapiens_gene_ensembl") 
 filters <- listFilters(dB)
 attrib  <- listAttributes(dB)
+
+Plot_dir <- "/home/maritilia/Documents/myR_projects/RenduOsler_git/Plots/"
 
 for ( g in geneID) { 
   # Search the description (given by : attrib[5,1] )
@@ -72,18 +75,23 @@ for ( g in geneID) {
   }
   
   .density.dsb(p,WE_covtab, WG_covtab)
-
+  ratio_tab <-.calc.ratio(WE_covtab, WG_covtab) 
 } #end.for ea gene
   
-                          ##   F U N C T I O N S   ## 
-.create.plots <- function(p, WG_tab, WE_tab,chosenExons) {
-  Plot_dir <- "/media/maritilia/DATA/#2015/ICAN_RenduOsler/myData/Plots/"
-  png(filename=paste(Plot_dir,"GeneCoverage/",g,"_WG-WE_Subject_",p,".png",sep=""))
-  par(mfrow=c(1,2))
-  .create.exon.barplot(WG_tab, whatData="WG",chosenExons,g,exonsOfGene,"mediumblue")
-  .create.exon.barplot(WE_tab, whatData="WE",chosenExons,g,exonsOfGene,"olivedrab")
-  mtext(paste("Gene Coverage of Subject ",p,sep=""),side = 3, at =-2, line = 0.8, cex=1.5)
-  dev.off()
+#Create histograms for Average Coverage = 0 and >50 per Patient
+.global.cov.zero.50(WE_covtab, WG_covtab,Plot_dir)      
+
+
+                   ##   F U N C T I O N S   ## 
+
+.create.plots <- function(p, WG_tab, WE_tab,chosenExons,Plot_dir) {
+    
+    png(filename=paste(Plot_dir,"GeneCoverage/",g,"_WG-WE_Subject_",p,".png",sep=""))
+    par(mfrow=c(1,2))
+    .create.exon.barplot(WG_tab, whatData="WG",chosenExons,g,exonsOfGene,"mediumblue")
+    .create.exon.barplot(WE_tab, whatData="WE",chosenExons,g,exonsOfGene,"olivedrab")
+    mtext(paste("Gene Coverage of Subject ",p,sep=""),side = 3, at =-2, line = 0.8, cex=1.5)
+    dev.off()
 }
 
 .create.exon.barplot <- function(seqData, whatData="",chosenExons, g, exonsOfGene, color) {
@@ -105,16 +113,55 @@ for ( g in geneID) {
 .density.dsb <- function(p, seqData1, seqData2) {
   
   ##>> DENSITY DISTRIBUTION of WG_Cov for the exons where WE_Cov=0 (For each Patient) 
-  
   ex.of.dat2 <- .common.exons(seqData1, seqData2)
   ex.of.dat1 <- .common.exons(seqData2, seqData1)
   
-  x11() 
+  #x11() #>show in window
+  png(filename=paste(Plot_dir,"Density_Distribution_",g,"_WG_Subject_",p,".png",sep=""))
   plot(density(seqData2[ex.of.dat2,3]),col="darkblue",xlim=range(0,150),xlab="",
        main=paste("Distribution of Exons Coverage (Subject No",p,")",sep=""))
   lines(density(seqData1[ex.of.dat1,3]),col="red") # Overlapped curves, BUT Exome curve is very thin around 0 !!
   legend("topright", c("Cov on WGS data","Cov on WES data"), col=c("darkblue","red"),pch=19)
+  dev.off()
 }
 
 
+.calc.ratio <- function(seqData1, seqData2) {
+  Ratio_tab <- matrix(c(),nrow=2,ncol=5)
+  for (i in seq(1,5)) {
+    ratio <- seqData2[[i]][,3] / seqData1[[i]][,3]  
+    ##some Values WES = 0 => ifelse ( WE.CovTab[,3]==0, 0.001,WE.CovTab[,3])
+    
+    # How many Exons have Ratio WG/WE bigger than 1.5 
+    # (Matrix with each col=Patient,each line a cutoff >/<) 
+    Ratio_tab[1,i] <- length(which(ratio > 1.5))
+    Ratio_tab[2,i] <- length(which(ratio < 1.5))
+  }
+  png(filename=paste(Plot_dir,"Barplot_Ratio_WG_WE.png",sep=" "))
+  barplot(Ratio_tab,beside=TRUE,col=c("violetred","royalblue1"),
+          names.arg=paste("Subject",seq(1,5),sep=""),ylab="# Exons",
+          main="Ratio WGS/WES on Coverage of Exons")
+  legend("topleft",c("Ratio>1.5", "Ratio<1.5"), 
+         col=c("violetred","royalblue1"),
+         bty="n", pch=15, cex=1.2 ) 
+  dev.off()
+  return(Ratio_tab)
+}
+
+.global.cov.zero.50 <- function(cov_exom, cov_genom,Plot_dir) {
+  
+  zero_cov <- sapply(cov_exom, function(pat){
+                                length(which(pat$average_coverage == 0))})
+  
+  more50_cov <- sapply(cov_genom, function(pat){
+                                  length(which(pat$average_coverage > 50))})
+  
+  png(filename =paste(Plot_dir,"NbExons_CovZero_Cov50.png",sep=""))
+    par(mfrow=c(1,2))
+    barplot(zero_cov, col="steelblue1",main="Number of Exons with Cov=0 on Whole Exome",
+            ylab="Nb of Exons",names.arg=paste("Subject",seq(1,5),sep=" ") )
+    barplot(more50_cov,col="sandybrown", main="Number of Exons with Cov >50 on Whole Genome",
+            log="y",ylab="Nb of Exons", names.arg=paste("Subject",seq(1,5),sep=" "))
+  dev.off()
+}
 
